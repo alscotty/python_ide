@@ -36,6 +36,59 @@ export default function Home() {
   const [isSettingUp, setIsSettingUp] = useState(false);
   const [setupProgress, setSetupProgress] = useState(0);
 
+  // Add code validation function
+  const validateCode = (code: string): { isValid: boolean; error?: string } => {
+    // List of dangerous patterns to check for
+    const dangerousPatterns = [
+      { pattern: /eval\s*\(/, message: "eval() function is not allowed" },
+      { pattern: /exec\s*\(/, message: "exec() function is not allowed" },
+      { pattern: /compile\s*\(/, message: "compile() function is not allowed" },
+      { pattern: /open\s*\(/, message: "File operations are not allowed" },
+      { pattern: /os\.system\s*\(/, message: "System commands are not allowed" },
+      { pattern: /subprocess\.run\s*\(/, message: "Subprocess execution is not allowed" },
+      { pattern: /socket\.socket\s*\(/, message: "Network operations are not allowed" },
+      { pattern: /threading\.Thread\s*\(/, message: "Thread creation is not allowed" },
+      { pattern: /multiprocessing\.Process\s*\(/, message: "Process creation is not allowed" },
+      { pattern: /import\s+os\s*$/, message: "os module is not allowed" },
+      { pattern: /import\s+sys\s*$/, message: "sys module is not allowed" },
+      { pattern: /import\s+subprocess\s*$/, message: "subprocess module is not allowed" },
+      { pattern: /import\s+socket\s*$/, message: "socket module is not allowed" },
+      { pattern: /import\s+threading\s*$/, message: "threading module is not allowed" },
+      { pattern: /import\s+multiprocessing\s*$/, message: "multiprocessing module is not allowed" },
+      { pattern: /import\s+ctypes\s*$/, message: "ctypes module is not allowed" },
+      { pattern: /import\s+pickle\s*$/, message: "pickle module is not allowed" },
+      { pattern: /import\s+marshal\s*$/, message: "marshal module is not allowed" },
+      { pattern: /import\s+builtins\s*$/, message: "builtins module is not allowed" },
+      { pattern: /import\s+globals\s*$/, message: "globals module is not allowed" },
+      { pattern: /import\s+locals\s*$/, message: "locals module is not allowed" },
+      { pattern: /import\s+vars\s*$/, message: "vars module is not allowed" },
+      { pattern: /import\s+dir\s*$/, message: "dir module is not allowed" },
+      { pattern: /import\s+help\s*$/, message: "help module is not allowed" },
+      { pattern: /import\s+input\s*$/, message: "input module is not allowed" },
+      { pattern: /import\s+raw_input\s*$/, message: "raw_input module is not allowed" },
+      { pattern: /import\s+execfile\s*$/, message: "execfile module is not allowed" },
+      { pattern: /import\s+reload\s*$/, message: "reload module is not allowed" },
+      { pattern: /import\s+importlib\s*$/, message: "importlib module is not allowed" },
+      { pattern: /import\s+zipimport\s*$/, message: "zipimport module is not allowed" },
+      { pattern: /import\s+pkgutil\s*$/, message: "pkgutil module is not allowed" },
+      { pattern: /import\s+pkg_resources\s*$/, message: "pkg_resources module is not allowed" }
+    ];
+
+    // Check for dangerous patterns
+    for (const { pattern, message } of dangerousPatterns) {
+      if (pattern.test(code)) {
+        return { isValid: false, error: message };
+      }
+    }
+
+    // Check for excessive code length
+    if (code.length > 10000) {
+      return { isValid: false, error: "Code is too long (maximum 10,000 characters)" };
+    }
+
+    return { isValid: true };
+  };
+
   // Run default command on page load
   useEffect(() => {
     handleTerminalCommand('python3 script.py');
@@ -63,6 +116,13 @@ export default function Home() {
   };
 
   const handleRunCode = async () => {
+    // Validate code before sending to backend
+    const validation = validateCode(code);
+    if (!validation.isValid) {
+      setOutput((prev) => prev + `Error: ${validation.error}\n`);
+      return;
+    }
+
     setIsRunning(true);
     const needsSetup = needsPandasOrScipy(code);
     if (needsSetup) {
@@ -93,6 +153,11 @@ export default function Home() {
         },
         body: JSON.stringify({ code }),
       });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to execute code');
+      }
 
       const data = await response.json();
       
