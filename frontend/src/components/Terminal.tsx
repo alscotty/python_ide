@@ -8,7 +8,7 @@ interface TerminalProps {
 }
 
 export default function Terminal({ output, onCommand }: TerminalProps) {
-  const [input, setInput] = useState('');
+  const [input, setInput] = useState('python3 script.py');
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const inputRef = useRef<HTMLInputElement>(null);

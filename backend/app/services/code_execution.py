@@ -6,6 +6,8 @@ import tempfile
 import uuid
 import subprocess
 import sys
+import time
+import shutil
 
 class CodeExecutionService:
     def __init__(self):
@@ -19,6 +21,26 @@ class CodeExecutionService:
         self.image_name = "python:3.11-slim"
         self.timeout = 30  # seconds
         self.memory_limit = "100m"  # 100MB memory limit
+        self.container = None
+
+    def needs_pandas_or_scipy(self, code: str) -> bool:
+        """Check if the code needs pandas or scipy"""
+        return 'import pandas' in code or 'import scipy' in code
+
+    def _ensure_container(self, needs_packages: bool):
+        """Ensure we have a container with required packages"""
+        if self.container is None and needs_packages:
+            # Create a new container with pandas and scipy pre-installed
+            self.container = self.client.containers.run(
+                'python:3.9-slim',
+                command='/bin/bash -c "mkdir -p /app && pip install -q --no-warn-script-location pandas scipy && tail -f /dev/null"',
+                detach=True,
+                tty=True,
+                stdin_open=True,
+                remove=True
+            )
+            # Wait for installation to complete
+            time.sleep(5)  # Give it time to install packages
 
     async def execute_code(self, code: str) -> Tuple[str, str, str]:
         """
@@ -71,37 +93,56 @@ class CodeExecutionService:
                 f.write(code)
                 temp_file = f.name
 
-            # Pull the image if it doesn't exist
-            try:
-                self.client.images.get(self.image_name)
-            except docker.errors.ImageNotFound:
-                self.client.images.pull(self.image_name)
+            # Create a temporary directory for mounting
+            temp_dir = tempfile.mkdtemp()
+            script_path = os.path.join(temp_dir, 'script.py')
+            shutil.copy2(temp_file, script_path)
 
-            # Create and run the container
-            container = self.client.containers.run(
-                self.image_name,
-                command=f"python {os.path.basename(temp_file)}",
-                volumes={os.path.dirname(temp_file): {'bind': '/app', 'mode': 'ro'}},
-                working_dir='/app',
-                name=container_name,
-                mem_limit=self.memory_limit,
-                detach=True
-            )
+            # Check if we need pandas or scipy
+            needs_packages = self.needs_pandas_or_scipy(code)
+            self._ensure_container(needs_packages)
 
-            try:
-                # Wait for the container to finish
-                container.wait(timeout=self.timeout)
-                logs = container.logs().decode('utf-8')
-                return logs, "success", ""
-            except docker.errors.NotFound:
-                return "", "error", "Container not found"
-            finally:
-                # Clean up
+            # Use the pre-configured container if we have one, otherwise use the base image
+            if needs_packages and self.container:
+                # Copy the file directly into the container
+                with open(script_path, 'rb') as f:
+                    self.container.put_archive('/app', {
+                        'script.py': f.read()
+                    })
+                # Execute the code in the pre-configured container
+                result = self.container.exec_run(
+                    f'python /app/script.py',
+                    workdir='/app'
+                )
+                output = result.output.decode('utf-8')
+                return output, "success", ""
+            else:
+                # Use a fresh container for simple code
+                container = self.client.containers.run(
+                    self.image_name,
+                    command='/bin/bash -c "mkdir -p /app && python /app/script.py"',
+                    volumes={temp_dir: {'bind': '/app', 'mode': 'ro'}},
+                    working_dir='/app',
+                    name=container_name,
+                    mem_limit=self.memory_limit,
+                    detach=True
+                )
+
                 try:
-                    container.remove(force=True)
-                except:
-                    pass
-                os.unlink(temp_file)
+                    # Wait for the container to finish
+                    container.wait(timeout=self.timeout)
+                    logs = container.logs().decode('utf-8')
+                    return logs, "success", ""
+                except docker.errors.NotFound:
+                    return "", "error", "Container not found"
+                finally:
+                    # Clean up
+                    try:
+                        container.remove(force=True)
+                    except:
+                        pass
+                    shutil.rmtree(temp_dir)
+                    os.unlink(temp_file)
 
         except Exception as e:
             return "", "error", str(e)
@@ -109,6 +150,17 @@ class CodeExecutionService:
             # Ensure cleanup in case of errors
             try:
                 container.remove(force=True)
+                shutil.rmtree(temp_dir)
                 os.unlink(temp_file)
+            except:
+                pass
+
+    def cleanup(self):
+        """Clean up the container"""
+        if self.container:
+            try:
+                self.container.stop()
+                self.container.remove()
+                self.container = None
             except:
                 pass 

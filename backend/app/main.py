@@ -5,6 +5,7 @@ from fastapi.exceptions import RequestValidationError
 from sqlalchemy.orm import Session
 from typing import Dict, Any, List
 from datetime import datetime
+from pydantic import BaseModel
 
 from . import models, schemas
 from .database import engine, get_db
@@ -30,6 +31,9 @@ app.add_middleware(
 
 # Initialize code execution service
 code_execution_service = CodeExecutionService()
+
+class CodeRequest(BaseModel):
+    code: str
 
 @app.get("/")
 async def root() -> Dict[str, Any]:
@@ -79,6 +83,18 @@ async def list_executions(
         .limit(limit)\
         .all()
     return executions
+
+@app.post("/execute")
+async def execute_code(request: CodeRequest):
+    output, status, error_message = await code_execution_service.execute_code(request.code)
+    if status == "error":
+        raise HTTPException(status_code=500, detail=error_message)
+    return {"status": status, "output": output}
+
+@app.get("/check-environment")
+async def check_environment():
+    is_ready = code_execution_service.check_environment()
+    return {"is_ready": is_ready}
 
 # Error handling
 @app.exception_handler(RequestValidationError)
