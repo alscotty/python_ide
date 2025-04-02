@@ -5,3 +5,5 @@ frontend/dist
 frontend/coverage
 frontend/public/images
 frontend/public/images/avatars
+/node_modules
+/package-lock.json
