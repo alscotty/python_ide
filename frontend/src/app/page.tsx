@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import CodeEditor from '@/components/CodeEditor';
 import Terminal from '@/components/Terminal';
 
@@ -8,6 +8,11 @@ export default function Home() {
   const [code, setCode] = useState('print("Hello, World!")');
   const [output, setOutput] = useState('');
   const [isRunning, setIsRunning] = useState(false);
+
+  // Run default command on page load
+  useEffect(() => {
+    handleTerminalCommand('python3 script.py');
+  }, []); // Empty dependency array means this runs once on mount
 
   const handleCodeChange = (value: string | undefined) => {
     if (value !== undefined) {
@@ -50,16 +55,20 @@ export default function Home() {
       case 'clear':
         setOutput('');
         break;
-      case 'run':
-        await handleRunCode();
+      case 'python3':
+        if (args[0] === 'script.py') {
+          await handleRunCode();
+        } else {
+          setOutput((prev) => prev + `Error: Only 'python3 script.py' is supported\n`);
+        }
         break;
       case 'help':
         setOutput((prev) => prev + `
 Available commands:
-  clear    - Clear the terminal
-  run      - Run the current code in the editor
-  help     - Show this help message
-  exit     - Exit the terminal
+  clear           - Clear the terminal
+  python3 script.py - Run the current code in the editor
+  help            - Show this help message
+  exit            - Exit the terminal
 `);
         break;
       case 'exit':
@@ -81,13 +90,6 @@ Available commands:
           <div className="flex flex-col">
             <div className="flex justify-between items-center mb-2">
               <h2 className="text-xl font-semibold text-gray-700">Code Editor</h2>
-              <button
-                onClick={handleRunCode}
-                disabled={isRunning}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-400"
-              >
-                {isRunning ? 'Running...' : 'Run Code'}
-              </button>
             </div>
             <div className="flex-1">
               <CodeEditor code={code} onChange={handleCodeChange} />
