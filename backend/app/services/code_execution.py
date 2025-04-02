@@ -8,6 +8,13 @@ import subprocess
 import sys
 import time
 import shutil
+import logging
+import tarfile
+import io
+
+# Set up logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 class CodeExecutionService:
     def __init__(self):
@@ -29,18 +36,58 @@ class CodeExecutionService:
 
     def _ensure_container(self, needs_packages: bool):
         """Ensure we have a container with required packages"""
-        if self.container is None and needs_packages:
-            # Create a new container with pandas and scipy pre-installed
-            self.container = self.client.containers.run(
-                'python:3.9-slim',
-                command='/bin/bash -c "mkdir -p /app && pip install -q --no-warn-script-location pandas scipy && tail -f /dev/null"',
-                detach=True,
-                tty=True,
-                stdin_open=True,
-                remove=True
-            )
-            # Wait for installation to complete
-            time.sleep(5)  # Give it time to install packages
+        if needs_packages:
+            try:
+                # Check if container exists and is running
+                if self.container:
+                    try:
+                        # Try to get container status
+                        self.container.reload()
+                        if self.container.status == 'running':
+                            logger.debug("Using existing container")
+                            return
+                    except docker.errors.NotFound:
+                        logger.debug("Container not found, creating new one")
+                        self.container = None
+                    except Exception as e:
+                        logger.debug(f"Error checking container: {str(e)}")
+                        self.container = None
+
+                logger.debug("Creating new container with pandas and scipy")
+                # Create a new container with pandas and scipy pre-installed
+                self.container = self.client.containers.run(
+                    'python:3.9-slim',
+                    command='/bin/bash -c "mkdir -p /app && pip install -q --no-warn-script-location pandas scipy && python -c \"import pandas; print(\'pandas installed successfully\')\" && tail -f /dev/null"',
+                    detach=True,
+                    tty=True,
+                    stdin_open=True,
+                    remove=True
+                )
+                
+                # Wait for installation to complete and verify
+                max_attempts = 10
+                for attempt in range(max_attempts):
+                    try:
+                        # Check if pandas is installed
+                        result = self.container.exec_run('python -c "import pandas; print(\'pandas available\')"')
+                        if result.exit_code == 0:
+                            logger.debug("Container created and packages installed successfully")
+                            return
+                    except Exception as e:
+                        logger.debug(f"Attempt {attempt + 1} failed: {str(e)}")
+                    time.sleep(2)  # Wait 2 seconds between attempts
+                
+                logger.error("Failed to verify pandas installation")
+                raise Exception("Failed to install required packages")
+            except Exception as e:
+                logger.error(f"Error setting up container: {str(e)}")
+                if self.container:
+                    try:
+                        self.container.remove(force=True)
+                    except:
+                        pass
+                    self.container = None
+                raise
 
     async def execute_code(self, code: str) -> Tuple[str, str, str]:
         """
@@ -86,37 +133,62 @@ class CodeExecutionService:
         """Execute code in a Docker container"""
         # Create a unique container name
         container_name = f"code_execution_{uuid.uuid4().hex[:8]}"
+        container = None
         
         try:
             # Create a temporary file with the code
             with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
                 f.write(code)
                 temp_file = f.name
+            logger.debug(f"Created temporary file: {temp_file}")
 
             # Create a temporary directory for mounting
             temp_dir = tempfile.mkdtemp()
             script_path = os.path.join(temp_dir, 'script.py')
             shutil.copy2(temp_file, script_path)
+            logger.debug(f"Created script at: {script_path}")
+            logger.debug(f"File exists: {os.path.exists(script_path)}")
 
             # Check if we need pandas or scipy
             needs_packages = self.needs_pandas_or_scipy(code)
-            self._ensure_container(needs_packages)
+            logger.debug(f"Needs packages: {needs_packages}")
+            
+            try:
+                self._ensure_container(needs_packages)
+            except Exception as e:
+                logger.error(f"Failed to ensure container: {str(e)}")
+                return "", "error", "Failed to set up the execution environment. Please try again."
 
             # Use the pre-configured container if we have one, otherwise use the base image
             if needs_packages and self.container:
-                # Copy the file directly into the container
-                with open(script_path, 'rb') as f:
-                    self.container.put_archive('/app', {
-                        'script.py': f.read()
-                    })
-                # Execute the code in the pre-configured container
-                result = self.container.exec_run(
-                    f'python /app/script.py',
-                    workdir='/app'
-                )
-                output = result.output.decode('utf-8')
-                return output, "success", ""
+                try:
+                    logger.debug("Using pre-configured container")
+                    # Create a tar archive of the script
+                    tar_stream = io.BytesIO()
+                    with tarfile.open(fileobj=tar_stream, mode='w') as tar:
+                        tar.add(script_path, arcname='script.py')
+                    tar_stream.seek(0)
+                    
+                    # Copy the file into the container
+                    self.container.put_archive('/app', tar_stream.getvalue())
+                    logger.debug("File copied to container")
+                    
+                    # Execute the code in the pre-configured container
+                    result = self.container.exec_run(
+                        f'python /app/script.py',
+                        workdir='/app'
+                    )
+                    output = result.output.decode('utf-8')
+                    return output, "success", ""
+                except docker.errors.NotFound:
+                    logger.debug("Container not found, recreating...")
+                    self.container = None
+                    return await self._execute_in_docker(code)  # Retry with new container
+                except Exception as e:
+                    logger.error(f"Error executing in pre-configured container: {str(e)}")
+                    return "", "error", "Failed to execute the code. Please try again."
             else:
+                logger.debug("Using fresh container")
                 # Use a fresh container for simple code
                 container = self.client.containers.run(
                     self.image_name,
@@ -133,8 +205,9 @@ class CodeExecutionService:
                     container.wait(timeout=self.timeout)
                     logs = container.logs().decode('utf-8')
                     return logs, "success", ""
-                except docker.errors.NotFound:
-                    return "", "error", "Container not found"
+                except Exception as e:
+                    logger.error(f"Container execution error: {str(e)}")
+                    return "", "error", "Failed to execute the code. Please try again."
                 finally:
                     # Clean up
                     try:
@@ -145,11 +218,13 @@ class CodeExecutionService:
                     os.unlink(temp_file)
 
         except Exception as e:
-            return "", "error", str(e)
+            logger.error(f"Error executing code: {str(e)}", exc_info=True)
+            return "", "error", "An unexpected error occurred. Please try again."
         finally:
             # Ensure cleanup in case of errors
             try:
-                container.remove(force=True)
+                if container:
+                    container.remove(force=True)
                 shutil.rmtree(temp_dir)
                 os.unlink(temp_file)
             except:
