@@ -39,9 +39,7 @@ if os.getenv("ENVIRONMENT") == "production":
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:3000",
-        "http://54.215.251.174:3000",  # Add your server's IP
-        "http://54.215.251.174",       # Add your server's IP without port
+        "*"
     ],
     allow_credentials=True,
     allow_methods=["*"],
