@@ -5,7 +5,31 @@ import CodeEditor from '@/components/CodeEditor';
 import Terminal from '@/components/Terminal';
 
 export default function Home() {
-  const [code, setCode] = useState(`print("Hello World")`);
+  const [code, setCode] = useState(`print("Hello World")
+
+# uncomment below to test pandas and scipy
+# import pandas as pd
+# import numpy as np
+# from scipy import stats
+
+# # Create a sample DataFrame
+# data = {
+#     "A": np.random.randn(100),
+#     "B": np.random.randn(100) * 2 + 1,
+# }
+# df = pd.DataFrame(data)
+# print("Sample DataFrame:")
+# print(df.head())
+
+# # Compute basic statistics
+# print("\\nStatistics:")
+# print(df.describe())
+
+# # Perform a t-test between columns A and B
+# t_stat, p_value = stats.ttest_ind(df["A"], df["B"], equal_var=False)
+# print("\\nT-test results:")
+# print(f"T-statistic: {t_stat}")
+# print(f"P-value: {p_value}")`);
 
   const [output, setOutput] = useState('');
   const [_isRunning, setIsRunning] = useState(false);
