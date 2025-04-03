@@ -9,6 +9,8 @@ import time
 import shutil
 import logging
 import re
+import io
+import contextlib
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
@@ -81,57 +83,45 @@ class CodeExecutionService:
 
     async def _execute_locally(self, code: str) -> Tuple[str, str, str]:
         """Execute code in the local Python environment"""
+        # Create a string buffer to capture output
+        output_buffer = io.StringIO()
+        error_buffer = io.StringIO()
+
         try:
-            # Create a temporary file
-            with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
-                f.write(code)
-                temp_file = f.name
-
-            # Get the current environment and modify it for pandas/scipy
-            env = os.environ.copy()
-            
-            # Add environment variables for pandas/scipy on Linux
-            if sys.platform == 'linux':
-                env['PYTHONPATH'] = os.path.dirname(sys.executable)
-                env['LD_LIBRARY_PATH'] = os.path.join(os.path.dirname(sys.executable), 'lib')
-                env['MKL_NUM_THREADS'] = '1'
-                env['OMP_NUM_THREADS'] = '1'
-                env['OPENBLAS_NUM_THREADS'] = '1'
-                env['VECLIB_MAXIMUM_THREADS'] = '1'
-                env['NUMEXPR_NUM_THREADS'] = '1'
-
-            # Run the code with timeout and environment
-            process = subprocess.Popen(
-                [sys.executable, temp_file],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                env=env,
-                bufsize=1  # Line buffered
-            )
-
-            try:
-                stdout, stderr = process.communicate(timeout=self.timeout)
-                status = "success" if process.returncode == 0 else "error"
-                
-                # Log any errors for debugging
-                if stderr:
-                    logger.error(f"Python execution error: {stderr}")
-                
-                return stdout, status, stderr
-            except subprocess.TimeoutExpired:
-                process.kill()
-                return "", "timeout", "Execution timed out"
-            finally:
-                # Clean up the temporary file
+            # Redirect stdout and stderr to our buffers
+            with contextlib.redirect_stdout(output_buffer), contextlib.redirect_stderr(error_buffer):
+                # Compile and execute the code
                 try:
-                    os.unlink(temp_file)
+                    # Compile the code
+                    compiled_code = compile(code, '<string>', 'exec')
+                    
+                    # Execute the code with a timeout
+                    start_time = time.time()
+                    exec(compiled_code, {'__builtins__': __builtins__})
+                    
+                    # Check for timeout
+                    if time.time() - start_time > self.timeout:
+                        return "", "timeout", "Execution timed out"
+                    
+                    # Get the output
+                    stdout = output_buffer.getvalue()
+                    stderr = error_buffer.getvalue()
+                    
+                    return stdout, "success", stderr
+                    
                 except Exception as e:
-                    logger.error(f"Error cleaning up temp file: {e}")
+                    stderr = error_buffer.getvalue()
+                    if not stderr:
+                        stderr = str(e)
+                    return "", "error", stderr
 
         except Exception as e:
             logger.error(f"Error executing code: {e}")
             return "", "error", str(e)
+        finally:
+            # Close the buffers
+            output_buffer.close()
+            error_buffer.close()
 
     def cleanup(self):
         """Clean up any resources"""
