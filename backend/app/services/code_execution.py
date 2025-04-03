@@ -87,26 +87,50 @@ class CodeExecutionService:
                 f.write(code)
                 temp_file = f.name
 
-            # Run the code with timeout
+            # Get the current environment and modify it for pandas/scipy
+            env = os.environ.copy()
+            
+            # Add environment variables for pandas/scipy on Linux
+            if sys.platform == 'linux':
+                env['PYTHONPATH'] = os.path.dirname(sys.executable)
+                env['LD_LIBRARY_PATH'] = os.path.join(os.path.dirname(sys.executable), 'lib')
+                env['MKL_NUM_THREADS'] = '1'
+                env['OMP_NUM_THREADS'] = '1'
+                env['OPENBLAS_NUM_THREADS'] = '1'
+                env['VECLIB_MAXIMUM_THREADS'] = '1'
+                env['NUMEXPR_NUM_THREADS'] = '1'
+
+            # Run the code with timeout and environment
             process = subprocess.Popen(
                 [sys.executable, temp_file],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True
+                text=True,
+                env=env,
+                bufsize=1  # Line buffered
             )
 
             try:
                 stdout, stderr = process.communicate(timeout=self.timeout)
                 status = "success" if process.returncode == 0 else "error"
+                
+                # Log any errors for debugging
+                if stderr:
+                    logger.error(f"Python execution error: {stderr}")
+                
                 return stdout, status, stderr
             except subprocess.TimeoutExpired:
                 process.kill()
                 return "", "timeout", "Execution timed out"
             finally:
                 # Clean up the temporary file
-                os.unlink(temp_file)
+                try:
+                    os.unlink(temp_file)
+                except Exception as e:
+                    logger.error(f"Error cleaning up temp file: {e}")
 
         except Exception as e:
+            logger.error(f"Error executing code: {e}")
             return "", "error", str(e)
 
     def cleanup(self):
