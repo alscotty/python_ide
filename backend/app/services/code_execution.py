@@ -11,6 +11,9 @@ import logging
 import re
 import io
 import contextlib
+import asyncio
+import concurrent.futures
+from concurrent.futures import ThreadPoolExecutor
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)
@@ -19,6 +22,7 @@ logger = logging.getLogger(__name__)
 class CodeExecutionService:
     def __init__(self):
         self.timeout = 30  # seconds
+        self.executor = ThreadPoolExecutor(max_workers=1)  # Single worker to prevent concurrent execution
         
         # Define dangerous operations and imports
         self.dangerous_imports = {
@@ -81,27 +85,19 @@ class CodeExecutionService:
 
         return await self._execute_locally(code)
 
-    async def _execute_locally(self, code: str) -> Tuple[str, str, str]:
-        """Execute code in the local Python environment"""
-        # Create a string buffer to capture output
+    def _run_code_in_thread(self, code: str) -> Tuple[str, str, str]:
+        """Execute code in a separate thread"""
         output_buffer = io.StringIO()
         error_buffer = io.StringIO()
 
         try:
-            # Redirect stdout and stderr to our buffers
             with contextlib.redirect_stdout(output_buffer), contextlib.redirect_stderr(error_buffer):
-                # Compile and execute the code
                 try:
                     # Compile the code
                     compiled_code = compile(code, '<string>', 'exec')
                     
-                    # Execute the code with a timeout
-                    start_time = time.time()
+                    # Execute the code
                     exec(compiled_code, {'__builtins__': __builtins__})
-                    
-                    # Check for timeout
-                    if time.time() - start_time > self.timeout:
-                        return "", "timeout", "Execution timed out"
                     
                     # Get the output
                     stdout = output_buffer.getvalue()
@@ -119,10 +115,26 @@ class CodeExecutionService:
             logger.error(f"Error executing code: {e}")
             return "", "error", str(e)
         finally:
-            # Close the buffers
             output_buffer.close()
             error_buffer.close()
 
+    async def _execute_locally(self, code: str) -> Tuple[str, str, str]:
+        """Execute code in a separate thread with timeout"""
+        try:
+            # Run the code in a separate thread with timeout
+            loop = asyncio.get_event_loop()
+            future = loop.run_in_executor(self.executor, self._run_code_in_thread, code)
+            
+            try:
+                stdout, status, stderr = await asyncio.wait_for(future, timeout=self.timeout)
+                return stdout, status, stderr
+            except asyncio.TimeoutError:
+                return "", "timeout", "Execution timed out"
+                
+        except Exception as e:
+            logger.error(f"Error executing code: {e}")
+            return "", "error", str(e)
+
     def cleanup(self):
         """Clean up any resources"""
-        pass 
+        self.executor.shutdown(wait=True) 
