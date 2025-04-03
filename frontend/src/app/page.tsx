@@ -33,8 +33,6 @@ export default function Home() {
 
   const [output, setOutput] = useState('');
   const [isRunning, setIsRunning] = useState(false);
-  const [isSettingUp, setIsSettingUp] = useState(false);
-  const [setupProgress, setSetupProgress] = useState(0);
 
   // Add code validation function
   const validateCode = (code: string): { isValid: boolean; error?: string } => {
@@ -124,26 +122,7 @@ export default function Home() {
     }
 
     setIsRunning(true);
-    const needsSetup = needsPandasOrScipy(code);
-    if (needsSetup) {
-      setIsSettingUp(true);
-      setSetupProgress(0);
-    }
     setOutput((prev) => prev + 'Running code...\n');
-
-    // Simulate progress for environment setup only if needed
-    let progressInterval: NodeJS.Timeout | undefined;
-    if (needsSetup) {
-      progressInterval = setInterval(() => {
-        setSetupProgress(prev => {
-          if (prev >= 90) {
-            clearInterval(progressInterval);
-            return 90;
-          }
-          return prev + 10;
-        });
-      }, 500);
-    }
 
     try {
       const response = await fetch('/api/execute', {
@@ -174,17 +153,7 @@ export default function Home() {
     } catch (error) {
       setOutput((prev) => prev + `Error: ${error instanceof Error ? error.message : 'Unknown error'}\n`);
     } finally {
-      if (needsSetup) {
-        clearInterval(progressInterval);
-        setSetupProgress(100);
-        setTimeout(() => {
-          setIsRunning(false);
-          setIsSettingUp(false);
-          setSetupProgress(0);
-        }, 500);
-      } else {
-        setIsRunning(false);
-      }
+      setIsRunning(false);
     }
   };
 
@@ -239,22 +208,8 @@ Available commands:
 
           <div className="flex flex-col">
             <h2 className="text-xl font-semibold text-gray-700 mb-2">Terminal</h2>
-            <div className="flex-1 relative">
+            <div className="flex-1">
               <Terminal output={output} onCommand={handleTerminalCommand} />
-              {isSettingUp && (
-                <div className="absolute right-0 top-0 w-48 bg-gray-800 text-white p-4 rounded-bl-lg shadow-lg">
-                  <div className="text-sm mb-2">Setting up environment...</div>
-                  <div className="w-full bg-gray-700 rounded-full h-2">
-                    <div 
-                      className="bg-blue-500 h-2 rounded-full transition-all duration-300"
-                      style={{ width: `${setupProgress}%` }}
-                    ></div>
-                  </div>
-                  <div className="text-xs mt-1 text-gray-400">
-                    Installing pandas and scipy...
-                  </div>
-                </div>
-              )}
             </div>
           </div>
         </div>
