@@ -150,13 +150,6 @@ async def list_executions(
         .all()
     return executions
 
-@app.post("/execute")
-async def execute_code(request: CodeRequest):
-    output, status, error_message = await code_execution_service.execute_code(request.code)
-    if status == "error":
-        raise HTTPException(status_code=500, detail=error_message)
-    return {"status": status, "output": output}
-
 @app.get("/check-environment")
 async def check_environment():
     is_ready = code_execution_service.check_environment()
@@ -168,6 +161,13 @@ async def validation_exception_handler(request, exc):
     return JSONResponse(
         status_code=422,
         content={"detail": exc.errors()},
+    )
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request, exc):
+    return JSONResponse(
+        status_code=500,
+        content={"detail": str(exc)},
     )
 
 if __name__ == "__main__":

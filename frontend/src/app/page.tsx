@@ -154,12 +154,17 @@ export default function Home() {
         body: JSON.stringify({ code }),
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to execute code');
+      let data;
+      try {
+        data = await response.json();
+      } catch (e) {
+        // If response is not JSON, use the status text
+        data = { detail: response.statusText || 'Failed to execute code' };
       }
 
-      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.detail || 'Failed to execute code');
+      }
       
       if (data.status === 'success') {
         setOutput((prev) => prev + (data.output || 'No output') + '\n');
