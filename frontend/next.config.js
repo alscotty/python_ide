@@ -23,6 +23,12 @@ const nextConfig = {
         ]
       }
     ];
+  },
+  // Add allowed development origins
+  allowedDevOrigins: ['54.215.251.174', 'localhost'],
+  // Ensure port is treated as string
+  experimental: {
+    serverActions: true,
   }
 };
 
