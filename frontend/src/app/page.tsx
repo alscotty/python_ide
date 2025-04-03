@@ -146,7 +146,7 @@ export default function Home() {
     }
 
     try {
-      const response = await fetch('http://localhost:8000/execute', {
+      const response = await fetch('/api/execute', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
