@@ -4,7 +4,9 @@ const nextConfig = {
     return [
       {
         source: '/api/:path*',
-        destination: `${process.env.NEXT_PUBLIC_API_URL}/api/:8000/:path*`
+        // Format: {NEXT_PUBLIC_API_URL}:8000/:path*
+        // Example: http://localhost:8000/execute or http://54.215.251.174:8000/execute
+        destination: `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost'}:8000/:path*`
       }
     ];
   },
