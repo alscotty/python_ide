@@ -38,7 +38,11 @@ if os.getenv("ENVIRONMENT") == "production":
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[os.getenv("FRONTEND_URL", "http://localhost:3000")],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://54.215.251.174:3000",  # Add your server's IP
+        "http://54.215.251.174",       # Add your server's IP without port
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
