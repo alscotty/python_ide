@@ -1,6 +1,9 @@
 # Code Execution Platform
 
 A modern web application featuring an integrated terminal environment for executing Python code and other development tasks.
+## Preview
+
+![Code Execution Platform Screenshot](./screenshot.png)
 
 ## Features
 
